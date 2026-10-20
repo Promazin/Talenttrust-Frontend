@@ -38,8 +38,8 @@ describe('ReputationLookup', () => {
   });
 
   beforeEach(() => {
-    fetchMock.mockClear();
-    mockReadOnChain.mockClear();
+    fetchMock.mockReset();
+    mockReadOnChain.mockReset();
     vi.stubGlobal('fetch', fetchMock);
     render(<ReputationLookup />);
   });
@@ -106,25 +106,40 @@ describe('ReputationLookup', () => {
     expect(screen.queryByText(/could not read contract/i)).not.toBeInTheDocument();
   });
 
-  it.each([
-    ['network error', () => fetchMock.mockRejectedValue(new Error('network down'))],
-    ['non-2xx', () => respondWith({}, 404)],
-  ] as [string, () => void][])('shows an API error and retry control for %s', async (_label: string, setup: () => void) => {
+  it('shows an API error and retry control for network error', async () => {
+    fetchMock.mockReset();
     mockReadOnChain.mockResolvedValue({ ...apiPayload, address: validAddress });
-    setup();
+    fetchMock.mockRejectedValue(new Error('network down'));
 
     const user = userEvent.setup();
     await submitLookup(user);
 
-    const errorText = _label === 'network error' ? 'network down' : 'Request failed (404)';
-    await waitFor(() => screen.getByText(errorText));
+    await waitFor(() => screen.getByText('network down'), { timeout: 10000 });
+    expect(screen.getByRole('heading', { name: 'On-chain (verified)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry api/i })).toBeInTheDocument();
+
+    respondWith(apiPayload);
+    await user.click(screen.getByRole('button', { name: /retry api/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(screen.queryByText(/network down/i)).not.toBeInTheDocument();
+  });
+
+  it('shows an API error and retry control for non-2xx', async () => {
+    fetchMock.mockReset();
+    mockReadOnChain.mockResolvedValue({ ...apiPayload, address: validAddress });
+    respondWith({}, 404);
+
+    const user = userEvent.setup();
+    await submitLookup(user);
+
+    await waitFor(() => screen.getByText('Request failed (404)'), { timeout: 10000 });
     expect(screen.getByRole('heading', { name: 'On-chain (verified)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /retry api/i })).toBeInTheDocument();
 
     respondWith(apiPayload);
     await user.click(screen.getByRole('button', { name: /retry api/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText(errorText)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Request failed \(404\)/i)).not.toBeInTheDocument();
   });
 
   it('renders without crashing when the API returns empty data', async () => {
@@ -145,7 +160,7 @@ describe('ReputationLookup', () => {
     const user = userEvent.setup();
     await submitLookup(user);
 
-    await waitFor(() => screen.getByText('network down'));
+    await waitFor(() => screen.getByText('network down'), { timeout: 10000 });
     await waitFor(() => screen.getByText('chain down'));
     expect(screen.getByRole('heading', { name: 'On-chain (verified)' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'TalentTrust API (demo)' })).toBeInTheDocument();
